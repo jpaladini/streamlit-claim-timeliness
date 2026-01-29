@@ -56,6 +56,25 @@ def load_data(n_claims: int = 5000, seed: int = 42) -> pd.DataFrame:
     return df
 
 
+def normalize_month(value: str) -> str:
+    """Normalize various date formats to YYYY-MM format for matching."""
+    if not value:
+        return ""
+    value = str(value)
+    # If already in YYYY-MM format
+    if len(value) == 7 and value[4] == '-':
+        return value
+    # If in YYYY-MM-DD format, extract YYYY-MM
+    if len(value) >= 10 and value[4] == '-' and value[7] == '-':
+        return value[:7]
+    # Try parsing as date
+    try:
+        parsed = pd.to_datetime(value)
+        return parsed.strftime('%Y-%m')
+    except:
+        return value
+
+
 def create_timeliness_gauge(value: float, title: str, threshold: float = 90) -> go.Figure:
     """Create a gauge chart for timeliness metrics."""
     color = "green" if value >= threshold else "orange" if value >= threshold * 0.8 else "red"
@@ -89,7 +108,7 @@ def create_timeliness_gauge(value: float, title: str, threshold: float = 90) -> 
 
 def display_drill_down_data(df: pd.DataFrame, title: str, key_prefix: str):
     """Display drill-down data with download option."""
-    if len(df) == 0:
+    if df is None or len(df) == 0:
         st.info("No data to display for this selection.")
         return
 
@@ -115,6 +134,17 @@ def display_drill_down_data(df: pd.DataFrame, title: str, key_prefix: str):
         mime="text/csv",
         key=f"download_{key_prefix}"
     )
+
+
+def filter_by_month(df: pd.DataFrame, month_col: str, selected_value: str) -> pd.DataFrame:
+    """Filter dataframe by month, handling various date formats."""
+    if not selected_value:
+        return pd.DataFrame()
+
+    normalized = normalize_month(selected_value)
+    # Filter where the month column starts with the normalized value
+    mask = df[month_col].astype(str).str.startswith(normalized)
+    return df[mask]
 
 
 def main():
@@ -180,7 +210,10 @@ def main():
     if selected_status != 'All':
         filtered_df = filtered_df[filtered_df['claim_status'] == selected_status]
 
+    # Create claims_df with month columns
     claims_df = filtered_df.groupby('claim_id').first().reset_index()
+    claims_df['paid_month'] = claims_df['paid_date'].dt.strftime('%Y-%m')
+    claims_df['received_month'] = claims_df['received_date'].dt.strftime('%Y-%m')
 
     # Main content
     st.title("📊 Claims Timeliness Dashboard")
@@ -240,7 +273,6 @@ def main():
 
         with trend_col1:
             # Monthly processing trend
-            claims_df['paid_month'] = claims_df['paid_date'].dt.to_period('M').astype(str)
             monthly_processing = claims_df.groupby('paid_month').agg({
                 'days_to_process': 'mean',
                 'claim_id': 'count'
@@ -259,10 +291,11 @@ def main():
             event = st.plotly_chart(fig, use_container_width=True, on_select="rerun", key="trend_processing")
 
             if event and event.selection and event.selection.points:
-                selected_month = event.selection.points[0]['x']
-                drill_data = claims_df[claims_df['paid_month'] == selected_month]
-                with st.expander(f"📋 Claims for {selected_month}", expanded=True):
-                    display_drill_down_data(drill_data, f"Claims paid in {selected_month}", "trend_proc")
+                selected_value = event.selection.points[0].get('x', '')
+                normalized_month = normalize_month(selected_value)
+                drill_data = claims_df[claims_df['paid_month'] == normalized_month]
+                with st.expander(f"📋 Claims for {normalized_month}", expanded=True):
+                    display_drill_down_data(drill_data, f"Claims paid in {normalized_month}", "trend_proc")
 
         with trend_col2:
             # Compliance trend
@@ -284,14 +317,14 @@ def main():
             event2 = st.plotly_chart(fig, use_container_width=True, on_select="rerun", key="trend_compliance")
 
             if event2 and event2.selection and event2.selection.points:
-                selected_month = event2.selection.points[0]['x']
-                drill_data = claims_df[claims_df['paid_month'] == selected_month]
-                with st.expander(f"📋 Claims for {selected_month}", expanded=True):
-                    display_drill_down_data(drill_data, f"Claims paid in {selected_month}", "trend_comp")
+                selected_value = event2.selection.points[0].get('x', '')
+                normalized_month = normalize_month(selected_value)
+                drill_data = claims_df[claims_df['paid_month'] == normalized_month]
+                with st.expander(f"📋 Claims for {normalized_month}", expanded=True):
+                    display_drill_down_data(drill_data, f"Claims paid in {normalized_month}", "trend_comp")
 
         # Volume trend
         st.markdown("### Claims Volume Trend")
-        claims_df['received_month'] = claims_df['received_date'].dt.to_period('M').astype(str)
         monthly_volume = claims_df.groupby('received_month').size().reset_index(name='claim_count')
 
         fig = px.bar(monthly_volume, x='received_month', y='claim_count',
@@ -301,10 +334,11 @@ def main():
         event3 = st.plotly_chart(fig, use_container_width=True, on_select="rerun", key="volume_trend")
 
         if event3 and event3.selection and event3.selection.points:
-            selected_month = event3.selection.points[0]['x']
-            drill_data = claims_df[claims_df['received_month'] == selected_month]
-            with st.expander(f"📋 Claims received in {selected_month}", expanded=True):
-                display_drill_down_data(drill_data, f"Claims received in {selected_month}", "volume")
+            selected_value = event3.selection.points[0].get('x', '')
+            normalized_month = normalize_month(selected_value)
+            drill_data = claims_df[claims_df['received_month'] == normalized_month]
+            with st.expander(f"📋 Claims received in {normalized_month}", expanded=True):
+                display_drill_down_data(drill_data, f"Claims received in {normalized_month}", "volume")
 
     # ==================== DISTRIBUTION TAB ====================
     with tab2:
@@ -323,17 +357,16 @@ def main():
             event = st.plotly_chart(fig, use_container_width=True, on_select="rerun", key="dist_process")
 
             if event and event.selection and event.selection.points:
-                # Get the bin range from selection
                 point = event.selection.points[0]
-                if 'x' in point:
-                    bin_start = point.get('x', 0)
-                    # Approximate bin width
-                    bin_width = (claims_df['days_to_process'].max() - claims_df['days_to_process'].min()) / 30
+                # For histograms, get the bin range
+                bin_start = point.get('x', 0)
+                if bin_start is not None:
+                    bin_width = max(1, (claims_df['days_to_process'].max() - claims_df['days_to_process'].min()) / 30)
                     bin_end = bin_start + bin_width
                     drill_data = claims_df[(claims_df['days_to_process'] >= bin_start) &
                                           (claims_df['days_to_process'] < bin_end)]
                     with st.expander(f"📋 Claims with {int(bin_start)}-{int(bin_end)} processing days", expanded=True):
-                        display_drill_down_data(drill_data, f"Claims in range", "dist_proc")
+                        display_drill_down_data(drill_data, f"Claims with {int(bin_start)}-{int(bin_end)} days", "dist_proc")
 
         with dist_col2:
             fig = px.histogram(claims_df, x='days_to_receive', nbins=30,
@@ -345,14 +378,14 @@ def main():
 
             if event2 and event2.selection and event2.selection.points:
                 point = event2.selection.points[0]
-                if 'x' in point:
-                    bin_start = point.get('x', 0)
-                    bin_width = (claims_df['days_to_receive'].max() - claims_df['days_to_receive'].min()) / 30
+                bin_start = point.get('x', 0)
+                if bin_start is not None:
+                    bin_width = max(1, (claims_df['days_to_receive'].max() - claims_df['days_to_receive'].min()) / 30)
                     bin_end = bin_start + bin_width
                     drill_data = claims_df[(claims_df['days_to_receive'] >= bin_start) &
                                           (claims_df['days_to_receive'] < bin_end)]
                     with st.expander(f"📋 Claims with {int(bin_start)}-{int(bin_end)} days to receive", expanded=True):
-                        display_drill_down_data(drill_data, f"Claims in range", "dist_recv")
+                        display_drill_down_data(drill_data, f"Claims with {int(bin_start)}-{int(bin_end)} days", "dist_recv")
 
         # Box plots
         st.markdown("### Processing Time by Category")
@@ -381,11 +414,11 @@ def main():
             event4 = st.plotly_chart(fig, use_container_width=True, on_select="rerun", key="box_network")
 
             if event4 and event4.selection and event4.selection.points:
-                selected_network = event4.selection.points[0].get('x')
-                if selected_network:
-                    drill_data = claims_df[claims_df['network_status'] == selected_network]
-                    with st.expander(f"📋 {selected_network} Claims", expanded=True):
-                        display_drill_down_data(drill_data, f"{selected_network} claims", "box_net")
+                selected_net = event4.selection.points[0].get('x')
+                if selected_net:
+                    drill_data = claims_df[claims_df['network_status'] == selected_net]
+                    with st.expander(f"📋 {selected_net} Claims", expanded=True):
+                        display_drill_down_data(drill_data, f"{selected_net} claims", "box_net")
 
     # ==================== SEGMENT TAB ====================
     with tab3:
@@ -410,11 +443,11 @@ def main():
             event = st.plotly_chart(fig, use_container_width=True, on_select="rerun", key="seg_group")
 
             if event and event.selection and event.selection.points:
-                selected_group = event.selection.points[0].get('x')
-                if selected_group:
-                    drill_data = claims_df[claims_df['group_id'] == selected_group]
-                    with st.expander(f"📋 Claims for {selected_group}", expanded=True):
-                        display_drill_down_data(drill_data, f"Group {selected_group} claims", "seg_grp")
+                selected_grp = event.selection.points[0].get('x')
+                if selected_grp:
+                    drill_data = claims_df[claims_df['group_id'] == selected_grp]
+                    with st.expander(f"📋 Claims for {selected_grp}", expanded=True):
+                        display_drill_down_data(drill_data, f"Group {selected_grp} claims", "seg_grp")
 
         with seg_col2:
             package_perf = claims_df.groupby('package').agg({
@@ -457,12 +490,15 @@ def main():
 
         if event3 and event3.selection and event3.selection.points:
             point = event3.selection.points[0]
-            selected_group = heatmap_pivot.index[point.get('y', 0)]
-            selected_type = heatmap_pivot.columns[point.get('x', 0)]
-            drill_data = claims_df[(claims_df['group_id'] == selected_group) &
-                                  (claims_df['claim_type'] == selected_type)]
-            with st.expander(f"📋 {selected_group} - {selected_type} Claims", expanded=True):
-                display_drill_down_data(drill_data, f"Claims for {selected_group} / {selected_type}", "heatmap")
+            y_idx = point.get('y', 0)
+            x_idx = point.get('x', 0)
+            if y_idx is not None and x_idx is not None and y_idx < len(heatmap_pivot.index) and x_idx < len(heatmap_pivot.columns):
+                selected_grp = heatmap_pivot.index[y_idx]
+                selected_type = heatmap_pivot.columns[x_idx]
+                drill_data = claims_df[(claims_df['group_id'] == selected_grp) &
+                                      (claims_df['claim_type'] == selected_type)]
+                with st.expander(f"📋 {selected_grp} - {selected_type} Claims", expanded=True):
+                    display_drill_down_data(drill_data, f"Claims for {selected_grp} / {selected_type}", "heatmap")
 
         # State performance
         st.markdown("### Performance by Provider State")
@@ -491,6 +527,10 @@ def main():
         st.markdown("### Financial Analysis")
         st.caption("Click on chart elements to explore underlying claim data")
 
+        # Add month column to filtered_df for financial tab
+        filtered_df_with_month = filtered_df.copy()
+        filtered_df_with_month['paid_month'] = filtered_df_with_month['paid_date'].dt.strftime('%Y-%m')
+
         fin_col1, fin_col2 = st.columns(2)
 
         with fin_col1:
@@ -508,11 +548,11 @@ def main():
             event = st.plotly_chart(fig, use_container_width=True, on_select="rerun", key="fin_status")
 
             if event and event.selection and event.selection.points:
-                selected_status = event.selection.points[0].get('x')
-                if selected_status:
-                    drill_data = filtered_df[filtered_df['claim_status'] == selected_status]
-                    with st.expander(f"📋 {selected_status} Claims", expanded=True):
-                        display_drill_down_data(drill_data, f"{selected_status} claims", "fin_stat")
+                selected_stat = event.selection.points[0].get('x')
+                if selected_stat:
+                    drill_data = filtered_df[filtered_df['claim_status'] == selected_stat]
+                    with st.expander(f"📋 {selected_stat} Claims", expanded=True):
+                        display_drill_down_data(drill_data, f"{selected_stat} claims", "fin_stat")
 
         with fin_col2:
             payment_ratio = filtered_df.groupby('claim_type').agg({
@@ -551,12 +591,13 @@ def main():
                 event3 = st.plotly_chart(fig, use_container_width=True, on_select="rerun", key="denial_pie")
 
                 if event3 and event3.selection and event3.selection.points:
-                    point_idx = event3.selection.points[0].get('pointIndex', 0)
-                    if point_idx < len(denial_reasons_df):
-                        selected_reason = denial_reasons_df.iloc[point_idx]['denial_reason']
+                    # For pie charts, use the label
+                    point = event3.selection.points[0]
+                    selected_reason = point.get('label')
+                    if selected_reason:
                         drill_data = denied_claims[denied_claims['denial_reason'] == selected_reason]
                         with st.expander(f"📋 Claims denied for: {selected_reason}", expanded=True):
-                            display_drill_down_data(drill_data, f"Denied claims", "denial_reason")
+                            display_drill_down_data(drill_data, f"Denied claims - {selected_reason}", "denial_reason")
 
             with denial_col2:
                 denial_by_type = denied_claims.groupby('claim_type').size().reset_index(name='count')
@@ -577,8 +618,7 @@ def main():
 
         # Monthly financial trend
         st.markdown("### Monthly Financial Trend")
-        filtered_df['paid_month'] = filtered_df['paid_date'].dt.to_period('M').astype(str)
-        monthly_financial = filtered_df.groupby('paid_month').agg({
+        monthly_financial = filtered_df_with_month.groupby('paid_month').agg({
             'billed_amount': 'sum',
             'paid_amount': 'sum'
         }).reset_index()
@@ -593,11 +633,11 @@ def main():
         event5 = st.plotly_chart(fig, use_container_width=True, on_select="rerun", key="fin_trend")
 
         if event5 and event5.selection and event5.selection.points:
-            selected_month = event5.selection.points[0].get('x')
-            if selected_month:
-                drill_data = filtered_df[filtered_df['paid_month'] == selected_month]
-                with st.expander(f"📋 Claims for {selected_month}", expanded=True):
-                    display_drill_down_data(drill_data, f"Claims paid in {selected_month}", "fin_monthly")
+            selected_value = event5.selection.points[0].get('x', '')
+            normalized_month = normalize_month(selected_value)
+            drill_data = filtered_df_with_month[filtered_df_with_month['paid_month'] == normalized_month]
+            with st.expander(f"📋 Claims for {normalized_month}", expanded=True):
+                display_drill_down_data(drill_data, f"Claims paid in {normalized_month}", "fin_monthly")
 
     # ==================== CLAIMS DETAIL TAB ====================
     with tab5:
