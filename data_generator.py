@@ -71,12 +71,12 @@ def generate_claims_data(n_claims: int = 5000, seed: int = 42) -> pd.DataFrame:
 
         # Generate dates with realistic relationships
         # First service date
-        days_from_start = np.random.randint(0, 730)
+        days_from_start = int(np.random.randint(0, 730))
         first_service_date = start_date + timedelta(days=days_from_start)
 
         # Last service date (same day to 30 days after first service)
-        service_duration = np.random.choice([0, 0, 0, 1, 2, 3, 5, 7, 14, 30],
-                                            p=[0.5, 0.15, 0.1, 0.05, 0.05, 0.03, 0.05, 0.03, 0.02, 0.02])
+        service_duration = int(np.random.choice([0, 0, 0, 1, 2, 3, 5, 7, 14, 30],
+                                            p=[0.5, 0.15, 0.1, 0.05, 0.05, 0.03, 0.05, 0.03, 0.02, 0.02]))
         last_service_date = first_service_date + timedelta(days=service_duration)
 
         # Received date (1-60 days after last service, with most within 30 days)
@@ -88,9 +88,9 @@ def generate_claims_data(n_claims: int = 5000, seed: int = 42) -> pd.DataFrame:
         processing_time = int(np.random.exponential(scale=8)) + 1
         # Add some outliers for timeliness analysis
         if np.random.random() < 0.1:  # 10% are delayed
-            processing_time = np.random.randint(30, 90)
+            processing_time = int(np.random.randint(30, 90))
         if np.random.random() < 0.03:  # 3% are significantly delayed
-            processing_time = np.random.randint(60, 180)
+            processing_time = int(np.random.randint(60, 180))
         paid_date = received_date + timedelta(days=processing_time)
 
         # Ensure paid_date doesn't exceed current date
@@ -151,8 +151,8 @@ def generate_claims_data(n_claims: int = 5000, seed: int = 42) -> pd.DataFrame:
             paid_amount = 0
 
         # Number of line items (1-10, weighted toward fewer)
-        n_lines = np.random.choice([1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
-                                   p=[0.35, 0.25, 0.15, 0.10, 0.05, 0.04, 0.02, 0.02, 0.01, 0.01])
+        n_lines = int(np.random.choice([1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+                                   p=[0.35, 0.25, 0.15, 0.10, 0.05, 0.04, 0.02, 0.02, 0.01, 0.01]))
 
         # Generate line items
         for line_num in range(1, n_lines + 1):
